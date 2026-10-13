@@ -11,14 +11,17 @@ def chat(message: str, thread_id: str):
         }
     }
 
-    result = chat_workflow.invoke(
+    for token, metadata in chat_workflow.stream(
         {
             "messages": [HumanMessage(content=message)]
         },
-        config=config
-    )
+        config=config,
+        stream_mode="messages"
+    ):
+        if metadata["langgraph_node"] == "chatbot_node":
+            if token.content:
+                yield token.content
 
-    return result["messages"][-1].content
 
 #function to get chat using thread id
 def get_chat(thread_id: str):

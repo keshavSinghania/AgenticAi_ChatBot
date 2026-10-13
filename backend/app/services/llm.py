@@ -5,5 +5,6 @@ load_dotenv()
 
 
 llm = ChatOllama(
-    model="llama3.2:latest"
+    model="llama3.2:latest",
+    streaming = True
 )

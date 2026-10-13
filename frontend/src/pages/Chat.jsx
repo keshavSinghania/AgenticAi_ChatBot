@@ -70,92 +70,140 @@ function Chat() {
   }
 
   // Send message
-  const sendChat = async () => {
-    const message = currentMessage.trim()
+  
+const sendChat = async () => {
+    const message = currentMessage.trim();
 
-    // Don't send empty message
-    if (!message) {
-      return
-    }
+    if (!message || isGenerating) return;
 
-    // Don't allow another request while generating
-    if (isGenerating) {
-      return
-    }
-
-    // Safety check
     if (!currentChatThreadId) {
-      console.log("No thread ID found")
-      return
+        console.log("No thread ID found");
+        return;
     }
 
     const userMessage = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: message
-    }
+        id: crypto.randomUUID(),
+        role: "user",
+        content: message
+    };
 
-    // Check whether this is the first message of this chat
-    const isNewChat = currentChatHistory.length === 0
+    const aiMessageId = crypto.randomUUID();
+    const isNewChat = currentChatHistory.length === 0;
 
     try {
-      setIsGenerating(true)
-      setCurrentMessage("")
+        setIsGenerating(true);
+        setCurrentMessage("");
 
-      // Immediately show user's message
-      setCurrentChatHistory((prev) => [
-        ...prev,
-        userMessage
-      ])
-
-      const response = await api.post("/chat", {
-        message: message,
-        thread_id: currentChatThreadId
-      })
-
-      if (response.status === 200) {
-
-        const aiMessage = {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: response.data.response
-        }
-
-        // Add AI response to UI
+        // Add the user's message immediately
         setCurrentChatHistory((prev) => [
-          ...prev,
-          aiMessage
-        ])
+            ...prev,
+            userMessage
+        ]);
 
-        // If this was the first message,
-        // add the new thread to the sidebar
-        if (isNewChat) {
-          setAllThreadIds((prev) => [
-            currentChatThreadId,
-            ...prev.filter(
-              (id) => id !== currentChatThreadId
-            )
-          ])
+        // Create an empty assistant message
+        setCurrentChatHistory((prev) => [
+            ...prev,
+            {
+                id: aiMessageId,
+                role: "assistant",
+                content: ""
+            }
+        ]);
+
+        // Send request to FastAPI
+        const response = await fetch("http://localhost:8000/chat", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                message: message,
+                thread_id: currentChatThreadId
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Request failed: ${response.status}`);
         }
-      }
+
+        if (!response.body) {
+            throw new Error("Streaming response body is unavailable");
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        // Read the response chunk by chunk
+        while (true) {
+            const { value, done } = await reader.read();
+
+            if (done) break;
+
+            const chunk = decoder.decode(value, {
+                stream: true
+            });
+
+            // Append each chunk to the same assistant message
+            if (chunk) {
+                setCurrentChatHistory((prev) =>
+                    prev.map((msg) =>
+                        msg.id === aiMessageId
+                            ? {
+                                ...msg,
+                                content: msg.content + chunk
+                            }
+                            : msg
+                    )
+                );
+            }
+        }
+
+        // Flush any remaining decoded text
+        const remaining = decoder.decode();
+
+        if (remaining) {
+            setCurrentChatHistory((prev) =>
+                prev.map((msg) =>
+                    msg.id === aiMessageId
+                        ? {
+                            ...msg,
+                            content: msg.content + remaining
+                        }
+                        : msg
+                )
+            );
+        }
+
+        // Add the new conversation to the sidebar
+        if (isNewChat) {
+            setAllThreadIds((prev) => [
+                currentChatThreadId,
+                ...prev.filter(
+                    (id) => id !== currentChatThreadId
+                )
+            ]);
+        }
 
     } catch (error) {
-      console.log("Error sending message:", error)
+        console.error("Error streaming response:", error);
 
-      // Show error message in UI
-      setCurrentChatHistory((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: "Something went wrong. Please try again."
-        }
-      ])
+        // Show an error only if no response text was received
+        setCurrentChatHistory((prev) =>
+            prev.map((msg) =>
+                msg.id === aiMessageId && !msg.content
+                    ? {
+                        ...msg,
+                        content: "Something went wrong. Please try again."
+                    }
+                    : msg
+            )
+        );
 
     } finally {
-      setIsGenerating(false)
+        setIsGenerating(false);
     }
-  }
+};
+
 
   // Handle Enter / Shift + Enter
   const handleKeyDown = (e) => {

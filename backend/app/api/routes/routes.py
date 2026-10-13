@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 
 from app.api.schemas.chat_schema import (
     ChatRequest,
@@ -20,15 +21,13 @@ router = APIRouter()
 @router.post("/chat")
 def chat_endpoint(request: ChatRequest):
 
-    response = chat(
-        request.message,
-        request.thread_id
+    return StreamingResponse(
+        chat(
+            request.message,
+            request.thread_id
+        ),
+        media_type="text/plain"
     )
-
-    return {
-        "response": response
-    }
-
 
 # Get chat history using thread id
 @router.get(
